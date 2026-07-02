@@ -18,20 +18,6 @@ const envConfig = {
 const isProd = import.meta.env.MODE === 'production';
 const usedFallback = Object.values(envConfig).some((v) => !v);
 
-if (usedFallback) {
-  const missing = Object.entries(envConfig)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
-  if (isProd) {
-    throw new Error(`Missing Firebase env variables: ${missing.join(', ')}`);
-  } else {
-    console.warn(
-      `[Firebase] Missing env vars: ${missing.join(', ')}. Using demo credentials for local development. ` +
-      `Set VITE_FIREBASE_* in your .env.local for production.`,
-    );
-  }
-}
-
 // Demo fallback values for local dev convenience
 const fallbackConfig = {
   apiKey: 'AIzaSyB7LrGyDeLg41PGhDVB_mQdwHeJbHT5V5A',
@@ -44,18 +30,26 @@ const fallbackConfig = {
   measurementId: 'G-2S8FQFJKLG',
 };
 
-const firebaseConfig = isProd
-  ? (envConfig as any)
-  : {
-    apiKey: envConfig.apiKey ?? fallbackConfig.apiKey,
-    authDomain: envConfig.authDomain ?? fallbackConfig.authDomain,
-    databaseURL: envConfig.databaseURL ?? fallbackConfig.databaseURL,
-    projectId: envConfig.projectId ?? fallbackConfig.projectId,
-    storageBucket: envConfig.storageBucket ?? fallbackConfig.storageBucket,
-    messagingSenderId: envConfig.messagingSenderId ?? fallbackConfig.messagingSenderId,
-    appId: envConfig.appId ?? fallbackConfig.appId,
-    measurementId: envConfig.measurementId ?? fallbackConfig.measurementId,
-  };
+if (usedFallback) {
+  const missing = Object.entries(envConfig)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  console.warn(
+    `[Firebase] Missing env vars: ${missing.join(', ')}. Using demo/fallback credentials. ` +
+    `Set VITE_FIREBASE_* in your environment or .env file for production.`
+  );
+}
+
+const firebaseConfig = {
+  apiKey: envConfig.apiKey ?? fallbackConfig.apiKey,
+  authDomain: envConfig.authDomain ?? fallbackConfig.authDomain,
+  databaseURL: envConfig.databaseURL ?? fallbackConfig.databaseURL,
+  projectId: envConfig.projectId ?? fallbackConfig.projectId,
+  storageBucket: envConfig.storageBucket ?? fallbackConfig.storageBucket,
+  messagingSenderId: envConfig.messagingSenderId ?? fallbackConfig.messagingSenderId,
+  appId: envConfig.appId ?? fallbackConfig.appId,
+  measurementId: envConfig.measurementId ?? fallbackConfig.measurementId,
+};
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getDatabase(app);
