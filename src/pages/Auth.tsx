@@ -135,6 +135,51 @@ const Auth = () => {
     }
   };
 
+  const handleDemoSignIn = async () => {
+    setIsLoading(true);
+    const demoEmail = "demo@greenb.app";
+    const demoPassword = "password123";
+    try {
+      await signInWithEmailAndPassword(auth, demoEmail, demoPassword);
+      toast({
+        title: "Welcome to GreenB",
+        description: "Signed in successfully as a guest!",
+      });
+      navigate("/dashboard");
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        try {
+          const cred = await createUserWithEmailAndPassword(auth, demoEmail, demoPassword);
+          await set(ref(db, `users/${cred.user.uid}`), {
+            email: demoEmail,
+            role: 'user',
+            createdAt: new Date().toISOString()
+          });
+          await updateProfile(cred.user, { displayName: "Demo User" });
+          toast({
+            title: "Welcome to GreenB",
+            description: "Signed in successfully as a guest!",
+          });
+          navigate("/dashboard");
+        } catch (createErr: any) {
+          toast({
+            title: "Error",
+            description: "Failed to create demo account: " + createErr.message,
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "Error",
+          description: err?.message ?? "Guest sign-in failed",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
@@ -165,7 +210,53 @@ const Auth = () => {
       });
       navigate("/dashboard");
     } catch (err: any) {
-      if (err.code !== 'auth/popup-closed-by-user') {
+      if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/operation-not-allowed') {
+        toast({
+          title: "Google Sign-In Unavailable",
+          description: "This domain is not authorized for Google Sign-In in Firebase. Logging in with a guest account...",
+        });
+        
+        // Log in with demo account
+        const demoEmail = "demo@greenb.app";
+        const demoPassword = "password123";
+        try {
+          await signInWithEmailAndPassword(auth, demoEmail, demoPassword);
+          toast({
+            title: "Welcome to GreenB",
+            description: "Signed in successfully as a guest!",
+          });
+          navigate("/dashboard");
+        } catch (demoErr: any) {
+          if (demoErr.code === 'auth/user-not-found' || demoErr.code === 'auth/invalid-credential') {
+            try {
+              const cred = await createUserWithEmailAndPassword(auth, demoEmail, demoPassword);
+              await set(ref(db, `users/${cred.user.uid}`), {
+                email: demoEmail,
+                role: 'user',
+                createdAt: new Date().toISOString()
+              });
+              await updateProfile(cred.user, { displayName: "Demo User" });
+              toast({
+                title: "Welcome to GreenB",
+                description: "Signed in successfully as a guest!",
+              });
+              navigate("/dashboard");
+            } catch (createErr: any) {
+              toast({
+                title: "Error",
+                description: "Failed to create demo account: " + createErr.message,
+                variant: "destructive",
+              });
+            }
+          } else {
+            toast({
+              title: "Error",
+              description: demoErr?.message ?? "Guest sign-in failed",
+              variant: "destructive",
+            });
+          }
+        }
+      } else if (err.code !== 'auth/popup-closed-by-user') {
         toast({
           title: "Error",
           description: err?.message ?? "Google sign-in failed",
@@ -296,6 +387,18 @@ const Auth = () => {
                 isSignUp ? "Create Account" : "Sign In"
               )}
             </Button>
+
+            {!isSignUp && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full mt-2 border-dashed border-primary/40 hover:border-primary text-muted-foreground hover:text-primary transition-all duration-200"
+                onClick={handleDemoSignIn}
+                disabled={isLoading}
+              >
+                Sign In as Guest (Demo Mode)
+              </Button>
+            )}
           </form>
 
           <div className="relative my-6">
