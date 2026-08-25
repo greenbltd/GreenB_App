@@ -1,5 +1,4 @@
-
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -11,7 +10,6 @@ import { Progress } from "@/components/ui/progress";
 import { CreditCard, Calendar, AlertTriangle, Zap } from 'lucide-react';
 import { Layout } from "@/components/layout/Layout";
 
-// Mock types matching backend
 interface Subscription {
     plan: string;
     status: 'active' | 'inactive' | 'cancelled' | 'expired';
@@ -19,51 +17,84 @@ interface Subscription {
     currentPeriodEnd: number;
 }
 
+const FREE_SUBSCRIPTION: Subscription = {
+    plan: 'free',
+    status: 'active',
+    binLimit: 1,
+    currentPeriodEnd: 0,
+};
+
 export default function BillingPage() {
-    const [subscription, setSubscription] = useState<Subscription | null>(null);
+    const [subscription, setSubscription] = useState<Subscription>(FREE_SUBSCRIPTION);
     const [usage, setUsage] = useState({ binCount: 0 });
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                // Fetch Subscription
-                onValue(ref(db, `subscriptions/${user.uid}`), (snapshot) => {
-                    if (snapshot.exists()) {
-                        setSubscription(snapshot.val());
-                    } else {
-                        setSubscription({
-                            plan: 'free',
-                            status: 'active',
-                            binLimit: 1, // Free tier limit
-                            currentPeriodEnd: 0
-                        });
-                    }
-                });
+        let subscriptionUnsubscribe: (() => void) | undefined;
+        let usageUnsubscribe: (() => void) | undefined;
+        let active = true;
 
-                // Fetch Usage (Bin Count)
-                // We'll read from strict usage node if available, else count bins?
-                // For now, let's assume usage is tracked or just list devices to count.
-                // Let's count devices directly for accuracy in this MVP.
-                onValue(ref(db, 'bins'), (snapshot) => {
-                    let count = 0;
-                    snapshot.forEach(child => {
-                        if (child.val().ownerUid === user.uid) count++;
-                    });
-                    setUsage({ binCount: count });
-                    setLoading(false);
-                });
-            } else {
+        const authUnsubscribe = onAuthStateChanged(auth, (user) => {
+            if (!active) return;
+
+            if (!user) {
+                setSubscription(FREE_SUBSCRIPTION);
+                setUsage({ binCount: 0 });
                 setLoading(false);
+                return;
             }
+
+            setLoading(true);
+
+            subscriptionUnsubscribe?.();
+            subscriptionUnsubscribe = onValue(
+                ref(db, `subscriptions/${user.uid}`),
+                (snapshot) => {
+                    if (!active) return;
+                    setSubscription(snapshot.exists() ? { ...FREE_SUBSCRIPTION, ...snapshot.val() } : FREE_SUBSCRIPTION);
+                    setLoading(false);
+                },
+                (error) => {
+                    console.error('Unable to load subscription', error);
+                    if (!active) return;
+                    setSubscription(FREE_SUBSCRIPTION);
+                    setLoading(false);
+                },
+            );
+
+            usageUnsubscribe?.();
+            // Devices are stored per user under devices/{uid}; the old bins path
+            // never received a callback in this app and could leave the page loading forever.
+            usageUnsubscribe = onValue(
+                ref(db, `devices/${user.uid}`),
+                (snapshot) => {
+                    if (!active) return;
+                    setUsage({ binCount: snapshot.exists() ? snapshot.size : 0 });
+                    setLoading(false);
+                },
+                (error) => {
+                    console.error('Unable to load device usage', error);
+                    if (!active) return;
+                    setUsage({ binCount: 0 });
+                    setLoading(false);
+                },
+            );
         });
-        return () => unsubscribe();
+
+        return () => {
+            active = false;
+            authUnsubscribe();
+            subscriptionUnsubscribe?.();
+            usageUnsubscribe?.();
+        };
     }, []);
 
-    const usagePercent = (usage.binCount / (subscription?.binLimit || 1)) * 100;
-    const daysLeft = subscription && subscription.currentPeriodEnd ? Math.ceil((subscription.currentPeriodEnd - Math.floor(Date.now() / 1000)) / 86400) : 0;
+    const usagePercent = Math.min(100, (usage.binCount / Math.max(1, subscription.binLimit)) * 100);
+    const daysLeft = subscription.currentPeriodEnd
+        ? Math.max(0, Math.ceil((subscription.currentPeriodEnd - Math.floor(Date.now() / 1000)) / 86400))
+        : 0;
 
-    if (loading) return <div className="p-10">Loading...</div>;
+    if (loading) return <div className="p-10">Loading subscription...</div>;
 
     return (
         <Layout>
@@ -73,7 +104,7 @@ export default function BillingPage() {
                         <h1 className="text-3xl font-bold tracking-tight">Billing & Subscription</h1>
                         <p className="text-muted-foreground mt-1">Manage your plan, usage, and billing history.</p>
                     </div>
-                    {!subscription || subscription.plan === 'free' ? (
+                    {subscription.plan === 'free' ? (
                         <Button asChild size="lg" className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-md">
                             <Link to="/pricing">
                                 <Zap className="mr-2 h-4 w-4 fill-current" /> Upgrade to Pro
@@ -87,7 +118,6 @@ export default function BillingPage() {
                 </div>
 
                 <div className="grid gap-8 md:grid-cols-3">
-                    {/* Current Plan Card - Spans 2 cols */}
                     <Card className="md:col-span-2 border-primary/20 bg-gradient-to-br from-card to-primary/5 shadow-xl relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
                         <CardHeader>
@@ -96,40 +126,36 @@ export default function BillingPage() {
                                     <CardTitle className="text-2xl">Current Plan</CardTitle>
                                     <CardDescription>Your subscription details</CardDescription>
                                 </div>
-                                <Badge className="text-sm px-3 py-1 capitalize border-primary/20" variant={subscription?.status === 'active' ? 'default' : 'secondary'}>
-                                    {subscription?.plan || 'Free'} Plan
+                                <Badge className="text-sm px-3 py-1 capitalize border-primary/20" variant={subscription.status === 'active' ? 'default' : 'secondary'}>
+                                    {subscription.plan} Plan
                                 </Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-8">
-                            {/* Stats Grid */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="p-4 rounded-xl bg-background/50 border border-border/50">
                                     <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Status</p>
                                     <div className="flex items-center gap-2 mt-1">
-                                        <div className={`h-2.5 w-2.5 rounded-full ${subscription?.status === 'active' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-400'}`} />
-                                        <span className="font-medium capitalize">{subscription?.status || 'Inactive'}</span>
+                                        <div className={`h-2.5 w-2.5 rounded-full ${subscription.status === 'active' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-400'}`} />
+                                        <span className="font-medium capitalize">{subscription.status}</span>
                                     </div>
                                 </div>
                                 <div className="p-4 rounded-xl bg-background/50 border border-border/50">
                                     <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wider">Renewal</p>
                                     <div className="flex items-center gap-2 mt-1">
                                         <Calendar className="h-4 w-4 text-muted-foreground" />
-                                        <span className="font-medium">
-                                            {subscription?.status === 'active' ? `${daysLeft} days remaining` : 'N/A'}
-                                        </span>
+                                        <span className="font-medium">{subscription.status === 'active' && daysLeft ? `${daysLeft} days remaining` : 'N/A'}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Usage Section */}
                             <div className="space-y-3">
                                 <div className="flex justify-between items-end">
                                     <div>
                                         <p className="font-medium text-sm">Bin Capacity</p>
                                         <p className="text-xs text-muted-foreground">Active bins vs plan limit</p>
                                     </div>
-                                    <span className="font-mono text-sm font-medium">{usage.binCount} <span className="text-muted-foreground">/ {subscription?.binLimit}</span></span>
+                                    <span className="font-mono text-sm font-medium">{usage.binCount} <span className="text-muted-foreground">/ {subscription.binLimit}</span></span>
                                 </div>
                                 <div className="relative pt-1">
                                     <Progress value={usagePercent} className="h-3 rounded-full bg-secondary" />
@@ -144,7 +170,6 @@ export default function BillingPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Billing History / Support Column */}
                     <div className="space-y-6">
                         <Card className="h-full border-muted/20">
                             <CardHeader>
