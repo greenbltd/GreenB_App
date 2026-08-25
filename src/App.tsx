@@ -18,6 +18,7 @@ import Pricing from "./pages/Pricing";
 import Billing from "./pages/Billing";
 import Admin from "./pages/Admin";
 import ForgotPassword from "./pages/ForgotPassword";
+import EcoRewards from "./pages/EcoRewards";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 
@@ -45,6 +46,7 @@ const App = () => (
               <Route path="/settings" element={<Settings />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/billing" element={<Billing />} />
+              <Route path="/eco-rewards" element={<EcoRewards />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/admin" element={<Admin />} />
             </Route>

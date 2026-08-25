@@ -1,6 +1,8 @@
 import { db } from '@/lib/firebase';
-import { ref, get, onValue, DataSnapshot, set, query, orderByChild, equalTo } from 'firebase/database';
+import { ref, get, onValue, DataSnapshot, set, update, push, runTransaction, query, orderByChild, equalTo } from 'firebase/database';
 import type { Device, Alert } from '@/types/device';
+import type { EcoCollectionRequest, EcoRewardStatus, EcoRewardTransaction, EcoWallet, WasteType } from '@/types/rewards';
+import { ECO_POINT_RATES } from '@/types/rewards';
 
 function snapshotToArray<T extends { id: string }>(snapshot: DataSnapshot): T[] {
   const val = snapshot.val();
@@ -321,4 +323,261 @@ export async function createDevice(input: {
     randomValue: undefined,
     status: 'online' as Device['status'],
   } as Device;
+}
+
+
+const EMPTY_ECO_WALLET: EcoWallet = {
+  pointsBalance: 0,
+  pendingPoints: 0,
+  lifetimePoints: 0,
+  totalKg: 0,
+  totalCollections: 0,
+  plasticKg: 0,
+  aluminiumKg: 0,
+  paperKg: 0,
+  otherKg: 0,
+};
+
+function normaliseEcoWallet(value: Partial<EcoWallet> | null | undefined): EcoWallet {
+  return {
+    ...EMPTY_ECO_WALLET,
+    ...(value ?? {}),
+  };
+}
+
+function ecoRewardFromValue(id: string, value: Record<string, unknown>): EcoRewardTransaction {
+  return {
+    id,
+    uid: String(value.uid ?? ''),
+    deviceId: String(value.deviceId ?? ''),
+    deviceName: value.deviceName ? String(value.deviceName) : undefined,
+    wasteType: (value.wasteType as WasteType) ?? 'other',
+    estimatedKg: Number(value.estimatedKg ?? 0),
+    verifiedKg: value.verifiedKg !== undefined ? Number(value.verifiedKg) : undefined,
+    points: Number(value.points ?? 0),
+    verifiedPoints: value.verifiedPoints !== undefined ? Number(value.verifiedPoints) : undefined,
+    status: (value.status as EcoRewardTransaction['status']) ?? 'claimed',
+    collectionStatus: (value.collectionStatus as EcoRewardTransaction['collectionStatus']) ?? 'not_requested',
+    requestId: value.requestId ? String(value.requestId) : undefined,
+    createdAt: String(value.createdAt ?? new Date().toISOString()),
+    verifiedAt: value.verifiedAt ? String(value.verifiedAt) : undefined,
+  };
+}
+
+function ecoCollectionFromValue(id: string, value: Record<string, unknown>): EcoCollectionRequest {
+  return {
+    id,
+    uid: String(value.uid ?? ''),
+    email: value.email ? String(value.email) : undefined,
+    type: 'eco_reward_pickup',
+    rewardId: String(value.rewardId ?? ''),
+    deviceId: String(value.deviceId ?? ''),
+    deviceName: value.deviceName ? String(value.deviceName) : undefined,
+    status: (value.status as EcoCollectionRequest['status']) ?? 'pending',
+    timestamp: Number(value.timestamp ?? Date.now()),
+    updatedAt: value.updatedAt !== undefined ? Number(value.updatedAt) : undefined,
+  };
+}
+
+export async function fetchEcoWallet(uid: string): Promise<EcoWallet> {
+  if (!uid) return EMPTY_ECO_WALLET;
+  const snap = await get(ref(db, `ecoRewards/wallets/${uid}`));
+  return normaliseEcoWallet(snap.exists() ? snap.val() : null);
+}
+
+export function subscribeEcoWallet(uid: string, onWallet: (wallet: EcoWallet) => void) {
+  if (!uid) {
+    onWallet(EMPTY_ECO_WALLET);
+    return () => undefined;
+  }
+  return onValue(ref(db, `ecoRewards/wallets/${uid}`), (snapshot) => {
+    onWallet(normaliseEcoWallet(snapshot.exists() ? snapshot.val() : null));
+  });
+}
+
+export async function fetchEcoRewards(uid: string): Promise<EcoRewardTransaction[]> {
+  if (!uid) return [];
+  const snap = await get(ref(db, `ecoRewards/transactions/${uid}`));
+  if (!snap.exists()) return [];
+  const value = snap.val() as Record<string, Record<string, unknown>>;
+  return Object.entries(value)
+    .map(([id, item]) => ecoRewardFromValue(id, item))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function subscribeEcoRewards(uid: string, onRewards: (rewards: EcoRewardTransaction[]) => void) {
+  if (!uid) {
+    onRewards([]);
+    return () => undefined;
+  }
+  return onValue(ref(db, `ecoRewards/transactions/${uid}`), (snapshot) => {
+    if (!snapshot.exists()) {
+      onRewards([]);
+      return;
+    }
+    const value = snapshot.val() as Record<string, Record<string, unknown>>;
+    onRewards(Object.entries(value)
+      .map(([id, item]) => ecoRewardFromValue(id, item))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+  });
+}
+
+export async function fetchEcoCollectionRequests(uid?: string): Promise<EcoCollectionRequest[]> {
+  const requestsRef = ref(db, 'requests');
+  const requestQuery = uid ? query(requestsRef, orderByChild('uid'), equalTo(uid)) : requestsRef;
+  const snap = await get(requestQuery);
+  if (!snap.exists()) return [];
+  const value = snap.val() as Record<string, Record<string, unknown>>;
+  return Object.entries(value)
+    .map(([id, item]) => ecoCollectionFromValue(id, item))
+    .filter((request) => request.type === 'eco_reward_pickup')
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export function subscribeEcoCollectionRequests(uid: string, onRequests: (requests: EcoCollectionRequest[]) => void) {
+  if (!uid) {
+    onRequests([]);
+    return () => undefined;
+  }
+  return onValue(query(ref(db, 'requests'), orderByChild('uid'), equalTo(uid)), (snapshot) => {
+    if (!snapshot.exists()) {
+      onRequests([]);
+      return;
+    }
+    const value = snapshot.val() as Record<string, Record<string, unknown>>;
+    onRequests(Object.entries(value)
+      .map(([id, item]) => ecoCollectionFromValue(id, item))
+      .filter((request) => request.type === 'eco_reward_pickup')
+      .sort((a, b) => b.timestamp - a.timestamp));
+  });
+}
+
+export function calculateEcoRewardPoints(wasteType: WasteType, estimatedKg: number) {
+  return Math.max(0, Math.round(Math.max(0, estimatedKg) * ECO_POINT_RATES[wasteType]));
+}
+
+export async function claimEcoReward(input: {
+  uid: string;
+  deviceId: string;
+  deviceName?: string;
+  wasteType: WasteType;
+  estimatedKg: number;
+}) {
+  const rewardId = push(ref(db, `ecoRewards/transactions/${input.uid}`)).key;
+  if (!rewardId) throw new Error('Unable to create reward ID');
+
+  const points = calculateEcoRewardPoints(input.wasteType, input.estimatedKg);
+  const createdAt = new Date().toISOString();
+  const reward: EcoRewardTransaction = {
+    id: rewardId,
+    uid: input.uid,
+    deviceId: input.deviceId,
+    deviceName: input.deviceName,
+    wasteType: input.wasteType,
+    estimatedKg: input.estimatedKg,
+    points,
+    status: 'claimed',
+    collectionStatus: 'not_requested',
+    createdAt,
+  };
+
+  await set(ref(db, `ecoRewards/transactions/${input.uid}/${rewardId}`), reward);
+  await runTransaction(ref(db, `ecoRewards/wallets/${input.uid}`), (current) => {
+    const wallet = normaliseEcoWallet(current as Partial<EcoWallet> | null);
+    return {
+      ...wallet,
+      pendingPoints: wallet.pendingPoints + points,
+      updatedAt: createdAt,
+    };
+  });
+  return reward;
+}
+
+export async function requestEcoCollection(input: {
+  uid: string;
+  email?: string;
+  reward: EcoRewardTransaction;
+}) {
+  if (input.reward.requestId) return input.reward.requestId;
+  const requestId = push(ref(db, 'requests')).key;
+  if (!requestId) throw new Error('Unable to create collection request ID');
+
+  const now = Date.now();
+  const request: EcoCollectionRequest = {
+    id: requestId,
+    uid: input.uid,
+    email: input.email,
+    type: 'eco_reward_pickup',
+    rewardId: input.reward.id,
+    deviceId: input.reward.deviceId,
+    deviceName: input.reward.deviceName,
+    status: 'pending',
+    timestamp: now,
+    updatedAt: now,
+  };
+
+  await set(ref(db, `requests/${requestId}`), request);
+  await update(ref(db, `ecoRewards/transactions/${input.uid}/${input.reward.id}`), {
+    status: 'pickup_requested',
+    collectionStatus: 'pending',
+    requestId,
+  });
+  return request;
+}
+
+export async function updateEcoCollectionStatus(requestId: string, status: EcoCollectionRequest['status']) {
+  const requestSnap = await get(ref(db, `requests/${requestId}`));
+  if (!requestSnap.exists()) throw new Error('Collection request not found');
+  const request = requestSnap.val() as EcoCollectionRequest;
+  const updates: Record<string, unknown> = {
+    [`requests/${requestId}/status`]: status,
+    [`requests/${requestId}/updatedAt`]: Date.now(),
+    [`ecoRewards/transactions/${request.uid}/${request.rewardId}/collectionStatus`]: status,
+  };
+  if (status === 'collected') {
+    updates[`ecoRewards/transactions/${request.uid}/${request.rewardId}/status`] = 'collected';
+  }
+  await update(ref(db), updates);
+}
+
+export async function verifyEcoReward(uid: string, rewardId: string, verifiedKg?: number) {
+  const rewardRef = ref(db, `ecoRewards/transactions/${uid}/${rewardId}`);
+  const rewardSnap = await get(rewardRef);
+  if (!rewardSnap.exists()) throw new Error('Reward claim not found');
+  const reward = ecoRewardFromValue(rewardId, rewardSnap.val() as Record<string, unknown>);
+  if (reward.status === 'verified') return reward;
+
+  const finalKg = Math.max(0, verifiedKg ?? reward.estimatedKg);
+  const finalPoints = calculateEcoRewardPoints(reward.wasteType, finalKg);
+  const now = new Date().toISOString();
+  await runTransaction(ref(db, `ecoRewards/wallets/${uid}`), (current) => {
+    const wallet = normaliseEcoWallet(current as Partial<EcoWallet> | null);
+    const wasteKey = `${reward.wasteType}Kg` as keyof Pick<EcoWallet, 'plasticKg' | 'aluminiumKg' | 'paperKg' | 'otherKg'>;
+    return {
+      ...wallet,
+      pointsBalance: wallet.pointsBalance + finalPoints,
+      pendingPoints: Math.max(0, wallet.pendingPoints - reward.points),
+      lifetimePoints: wallet.lifetimePoints + finalPoints,
+      totalKg: wallet.totalKg + finalKg,
+      totalCollections: wallet.totalCollections + 1,
+      [wasteKey]: Number(wallet[wasteKey] ?? 0) + finalKg,
+      updatedAt: now,
+    };
+  });
+
+  const updates: Record<string, unknown> = {
+    status: 'verified' as EcoRewardStatus,
+    collectionStatus: 'verified',
+    verifiedKg: finalKg,
+    verifiedPoints: finalPoints,
+    verifiedAt: now,
+  };
+  await update(rewardRef, updates);
+  if (reward.requestId) {
+    await update(ref(db, `requests/${reward.requestId}`), {
+      status: 'verified',
+      updatedAt: Date.now(),
+    });
+  }
+  return { ...reward, ...updates } as EcoRewardTransaction;
 }

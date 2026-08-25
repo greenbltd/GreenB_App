@@ -4,15 +4,17 @@ import { Badge } from '@/components/ui/badge';
 interface StatusBadgeProps {
   isFull: boolean;
   computed?: boolean;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
 }
 
-export const StatusBadge = ({ isFull, computed = false, size = 'md' }: StatusBadgeProps) => {
+export const StatusBadge = ({ isFull, computed = false, size = 'md', className }: StatusBadgeProps) => {
   return (
     <Badge
       className={cn(
         'font-semibold',
-        size === 'sm' ? 'text-xs px-2 py-0.5' : 'text-sm px-3 py-1',
+        className,
+        size === 'sm' ? 'text-xs px-2 py-0.5' : size === 'lg' ? 'text-base px-4 py-1.5' : 'text-sm px-3 py-1',
         isFull
           ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
           : 'bg-success text-success-foreground hover:bg-success/90'

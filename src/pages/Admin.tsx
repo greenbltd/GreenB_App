@@ -7,22 +7,59 @@ import { ref, onValue } from 'firebase/database';
 import { auth, db } from '@/lib/firebase';
 import { useNavigate } from 'react-router-dom';
 import { Users, Activity, DollarSign, ShieldAlert, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { updateEcoCollectionStatus, verifyEcoReward } from '@/services/realtime';
+import type { EcoCollectionRequest } from '@/types/rewards';
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell, Legend } from 'recharts';
+
+type AdminRequest = {
+    id: string;
+    uid?: string;
+    email?: string;
+    type?: string;
+    status?: string;
+    rewardId?: string;
+    timestamp: number;
+};
 
 export default function Admin() {
     const [role, setRole] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
-    const [stats, setStats] = useState({ users: 0, activeSubs: 0, revenue: 0, bins: 0, requests: [] });
-    const [chartData, setChartData] = useState<any[]>([]);
-    const [pieData, setPieData] = useState<any[]>([]);
+    const [stats, setStats] = useState<{ users: number; activeSubs: number; revenue: number; bins: number; requests: AdminRequest[] }>({ users: 0, activeSubs: 0, revenue: 0, bins: 0, requests: [] });
+    const [chartData, setChartData] = useState<Array<{ date: string; amount: number }>>([]);
+    const [pieData, setPieData] = useState<Array<{ name: string; value: number }>>([]);
     const [statsLoading, setStatsLoading] = useState(true);
+    const [requestActionId, setRequestActionId] = useState('');
+
+    const handleCollectionStatus = async (request: { id: string }, status: EcoCollectionRequest['status']) => {
+        setRequestActionId(request.id);
+        try {
+            await updateEcoCollectionStatus(request.id, status);
+        } catch (error) {
+            console.error('Unable to update collection status', error);
+        } finally {
+            setRequestActionId('');
+        }
+    };
+
+    const handleVerifyReward = async (request: { id: string; uid?: string; rewardId?: string }) => {
+        if (!request.uid || !request.rewardId) return;
+        setRequestActionId(request.id);
+        try {
+            await verifyEcoReward(request.uid, request.rewardId);
+        } catch (error) {
+            console.error('Unable to verify EcoReward', error);
+        } finally {
+            setRequestActionId('');
+        }
+    };
 
     useEffect(() => {
         let roleUnsubscribe: (() => void) | undefined;
-        let dataUnsubscribes: (() => void)[] = [];
+        const dataUnsubscribes: (() => void)[] = [];
 
         const authUnsubscribe = onAuthStateChanged(auth, (user) => {
             if (user) {
@@ -94,13 +131,12 @@ export default function Admin() {
 
                             // Emergency Requests
                             const requestsUnsub = onValue(ref(db, 'requests'), (snap) => {
-                                const reqs: any[] = [];
+                                const reqs: AdminRequest[] = [];
                                 snap.forEach((child) => {
                                     reqs.push({ id: child.key, ...child.val() });
                                 });
                                 // Sort newest first
                                 reqs.sort((a, b) => b.timestamp - a.timestamp);
-                                // @ts-ignore
                                 setStats(prev => ({ ...prev, requests: reqs }));
                             });
                             dataUnsubscribes.push(requestsUnsub);
@@ -304,15 +340,13 @@ export default function Admin() {
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
                                 <ShieldAlert className="h-5 w-5 text-red-500 animate-pulse" />
-                                Emergency Requests
+                                Collection & Emergency Requests
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="max-h-[300px] overflow-y-auto">
-                            {/* @ts-ignore */}
-                            {stats.requests && stats.requests.length > 0 ? (
+                            {stats.requests.length > 0 ? (
                                 <div className="space-y-4">
-                                    {/* @ts-ignore */}
-                                    {stats.requests.map((req: any) => (
+                                    {stats.requests.map((req) => (
                                         <div key={req.id} className="flex items-center justify-between border-b border-red-500/10 pb-4 last:border-0 last:pb-0 hover:bg-red-500/5 p-2 rounded-lg transition-colors">
                                             <div className="space-y-1">
                                                 <p className="font-medium leading-none">{req.email}</p>
@@ -321,16 +355,28 @@ export default function Admin() {
                                                 </p>
                                                 <p className="text-xs font-semibold text-red-500 uppercase">{req.type}</p>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex flex-wrap items-center justify-end gap-2">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${req.status === 'pending' ? 'bg-red-500/20 text-red-600' : 'bg-green-500/20 text-green-600'}`}>
-                                                    {req.status}
+                                                    {req.status?.replace('_', ' ')}
                                                 </span>
+                                                {req.type === 'eco_reward_pickup' && req.status === 'pending' && (
+                                                    <Button size="sm" variant="outline" disabled={requestActionId === req.id} onClick={() => handleCollectionStatus(req, 'assigned')}>Assign agent</Button>
+                                                )}
+                                                {req.type === 'eco_reward_pickup' && req.status === 'assigned' && (
+                                                    <Button size="sm" variant="outline" disabled={requestActionId === req.id} onClick={() => handleCollectionStatus(req, 'en_route')}>Mark on way</Button>
+                                                )}
+                                                {req.type === 'eco_reward_pickup' && req.status === 'en_route' && (
+                                                    <Button size="sm" variant="outline" disabled={requestActionId === req.id} onClick={() => handleCollectionStatus(req, 'collected')}>Mark collected</Button>
+                                                )}
+                                                {req.type === 'eco_reward_pickup' && req.status === 'collected' && (
+                                                    <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={requestActionId === req.id} onClick={() => handleVerifyReward(req)}>Verify & credit</Button>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                                <p className="text-sm text-muted-foreground">No active emergency requests.</p>
+                                <p className="text-sm text-muted-foreground">No active collection or emergency requests.</p>
                             )}
                         </CardContent>
                     </Card>

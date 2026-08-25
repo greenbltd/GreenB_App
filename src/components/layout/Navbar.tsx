@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, HardDrive, Bell, Map, Settings, User, LogOut, Sun, Moon, CreditCard, DollarSign, ShieldCheck, Zap } from 'lucide-react';
+import { LayoutDashboard, HardDrive, Bell, Map, Settings, User, LogOut, Sun, Moon, CreditCard, DollarSign, ShieldCheck, Zap, Coins } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import Logo from '@/components/ui/Logo';
@@ -23,12 +23,21 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 
+interface AdminNotificationRequest {
+  id: string;
+  email?: string;
+  type?: string;
+  status?: string;
+  timestamp?: number;
+}
+
 const navLinks = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/devices', label: 'Devices', icon: HardDrive },
   { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/map', label: 'Map', icon: Map },
   { to: '/billing', label: 'Subscription', icon: CreditCard },
+  { to: '/eco-rewards', label: 'EcoReward', icon: Coins },
 ];
 
 export const Navbar = () => {
@@ -36,7 +45,7 @@ export const Navbar = () => {
   const { resolvedTheme, setTheme } = useTheme();
   const [userRole, setUserRole] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [latestRequests, setLatestRequests] = useState<any[]>([]);
+  const [latestRequests, setLatestRequests] = useState<AdminNotificationRequest[]>([]);
 
   useEffect(() => {
     let roleUnsubscribe: (() => void) | undefined;
@@ -54,7 +63,7 @@ export const Navbar = () => {
             if (requestsUnsubscribe) requestsUnsubscribe();
             requestsUnsubscribe = onValue(ref(db, 'requests'), (reqSnap) => {
               let count = 0;
-              const reqs: any[] = [];
+              const reqs: AdminNotificationRequest[] = [];
 
               reqSnap.forEach((child) => {
                 const val = child.val();
@@ -96,7 +105,7 @@ export const Navbar = () => {
   }, []);
 
   const filteredNavLinks = navLinks.filter(link => {
-    if (userRole === 'admin' && (link.to === '/billing' || link.to === '/pricing')) {
+    if (userRole === 'admin' && (link.to === '/billing' || link.to === '/pricing' || link.to === '/eco-rewards')) {
       return false;
     }
     return true;

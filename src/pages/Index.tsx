@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Trash2, AlertTriangle, Activity, Gauge, Truck } from 'lucide-react';
+import { Trash2, AlertTriangle, Activity, Gauge, Truck, Coins } from 'lucide-react';
 import { Layout } from '@/components/layout/Layout';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { FillTrendChart } from '@/components/dashboard/FillTrendChart';
@@ -163,6 +163,18 @@ const Index = () => {
             variant={averageFill > 75 ? 'warning' : 'success'}
           />
         </div>
+
+        {!isAdmin && (
+          <Card className="border-emerald-500/20 bg-gradient-to-r from-emerald-500/10 via-card to-card shadow-sm">
+            <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-emerald-500/15 p-2.5 text-emerald-600 dark:text-emerald-300"><Coins className="h-5 w-5" /></div>
+                <div><p className="font-semibold text-foreground">EcoReward cashback is ready</p><p className="text-sm text-muted-foreground">Claim points from a full bin, request pickup, and track your verified recycling impact.</p></div>
+              </div>
+              <Button asChild variant="outline" className="border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"><Link to="/eco-rewards">Open EcoReward</Link></Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Charts and Alerts */}
         <div className="grid gap-6 lg:grid-cols-3">

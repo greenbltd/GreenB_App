@@ -7,10 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAlerts, subscribeAlerts } from '@/services/realtime';
-import { AlertCircle, AlertTriangle, Battery, Zap, Search, Filter, Check, Bell } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Battery, Zap, Search, Filter, Check, Bell, Coins } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Alert } from '@/types/device';
+import { Link } from 'react-router-dom';
 import { auth, db } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -327,12 +328,22 @@ const Alerts = () => {
                         <span className="text-xs text-muted-foreground">
                           {format(new Date(alert.timestamp), 'MMM d, yyyy HH:mm')}
                         </span>
-                        {!alert.acknowledged && (
-                          <Button size="sm" variant="outline" className="text-xs">
-                            <Check className="mr-1 h-3 w-3" />
-                            Acknowledge
-                          </Button>
-                        )}
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {alert.type === 'full' && (
+                            <Button size="sm" className="bg-emerald-600 text-xs text-white hover:bg-emerald-700" asChild>
+                              <Link to={`/eco-rewards?device=${encodeURIComponent(alert.deviceId)}`}>
+                                <Coins className="mr-1 h-3 w-3" />
+                                Claim Reward
+                              </Link>
+                            </Button>
+                          )}
+                          {!alert.acknowledged && (
+                            <Button size="sm" variant="outline" className="text-xs">
+                              <Check className="mr-1 h-3 w-3" />
+                              Acknowledge
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
